@@ -5,8 +5,11 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.service.orderservice.dto.Status;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "orders")
@@ -20,15 +23,33 @@ public class Order {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "user_id")
+    private String userId;
+
     @Column(name = "order_number")
     private String orderNumber;
 
-    @Column(name = "sku_code")
-    private String skuCode;
-
-    @Column(name = "price")
-    private BigDecimal price;
-
     @Column(name = "quantity")
     private Integer quantity;
+
+    @Column(name = "total_amount")
+    private Double totalAmount;
+
+    @Enumerated(EnumType.STRING)
+    private Status status;
+
+    @ManyToMany
+    @JoinTable(
+            name = "orders_products", // Join table
+            joinColumns = @JoinColumn(name = "order_id"), // Foreign key to Student
+            inverseJoinColumns = @JoinColumn(name = "products_id"),
+            uniqueConstraints = @UniqueConstraint(columnNames = {"order_id", "products_id"})// Foreign key to Course
+    )
+    private List<Product> products;
+
+    @OneToOne(mappedBy = "order", cascade = CascadeType.ALL)
+    private ContactDetails contactDetails;
+
+    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL)
+    private List<OrderProduct> orderProducts = new ArrayList<>();
 }

@@ -1,11 +1,13 @@
 package org.service.orderservice.dto;
 
-import java.math.BigDecimal;
+import java.util.List;
 
 public record OrderRequest(Long id,
                            String orderNumber,
-                           String skuCode,
-                           BigDecimal price,
+                           String userId,
                            Integer quantity,
-                           String email) {
+                           List<ProductDto> products,
+                           UserDetails userDetails,
+                           ContactDetailsRequest contactDetails,
+                           Status status) {
 }
