@@ -36,16 +36,16 @@ class OrderServiceApplicationTests {
 
     @Test
     void shouldSubmitOrder() {
-        String submitOrderJson = """
-                {
-                         "orderNumber": "1",
-                         "skuCode": "iphone_15",
-                         "price": 1000,
-                         "quantity": 1
-                }
-                """;
+        //String submitOrderJson = """
+                //{
+                //         "orderNumber": "1",
+                //         "skuCode": "iphone_15",
+                //         "price": 1000,
+                //         "quantity": 1
+               // }
+               // """;
 
-        InventoryClientStub.stubInventoryCall("iphone_15", 1);
+        //InventoryClientStub.stubInventoryCall("iphone_15", 1);
 
        // RestAssured.given()
           //      .contentType("application/json")

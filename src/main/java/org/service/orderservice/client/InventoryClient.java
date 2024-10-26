@@ -1,13 +1,14 @@
 package org.service.orderservice.client;
 
-import org.service.orderservice.dto.InStockRequest;
+import brave.Response;
+import org.service.orderservice.dto.ReserveProductsRequest;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.service.annotation.GetExchange;
+import org.springframework.web.service.annotation.PostExchange;
 
 
 public interface InventoryClient {
 
-    @GetExchange("/api/inventory/inStock")
-    boolean isInStock(@RequestBody InStockRequest inStockRequest);
+    @PostExchange("/api/inventory/reserveProducts")
+    ResponseEntity<Boolean> reserveProducts(@RequestBody ReserveProductsRequest reserveProductsRequest);
 }

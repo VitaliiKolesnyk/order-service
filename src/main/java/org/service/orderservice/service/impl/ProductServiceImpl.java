@@ -19,7 +19,7 @@ public class ProductServiceImpl implements ProductService {
     private final ProductRepository productRepository;
 
     @Override
-    @KafkaListener(topics = "product-events", groupId = "order-service-group")
+    //@KafkaListener(topics = "product-events", groupId = "order-service-group")
     public void listen(ProductEvent productEvent) {
         log.info("Got Message from product-events topic {}", productEvent);
 

@@ -1,5 +1,9 @@
 package org.service.orderservice.service.impl;
 
+import brave.Response;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.service.orderservice.client.InventoryClient;
 import org.service.orderservice.dto.*;
 import org.service.orderservice.entity.ContactDetails;
@@ -7,7 +11,8 @@ import org.service.orderservice.entity.Order;
 import org.service.orderservice.entity.OrderProduct;
 import org.service.orderservice.entity.Product;
 import org.service.orderservice.event.NotificationEvent;
-import org.service.orderservice.exception.NotInStockException;
+import org.service.orderservice.event.OrderCancelEvent;
+import org.service.orderservice.event.ProductEvent;
 import org.service.orderservice.mapper.OrderMapper;
 import org.service.orderservice.mapper.ProductMapper;
 import org.service.orderservice.repository.OrderRepository;
@@ -15,6 +20,9 @@ import org.service.orderservice.repository.ProductRepository;
 import org.service.orderservice.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
@@ -41,14 +49,16 @@ public class OrderServiceImpl implements OrderService  {
 
     @Override
     public OrderResponse placeOrder(OrderRequest orderRequest) {
-        InStockRequest inStockRequest = new InStockRequest(orderRequest.products());
-        boolean inStock = inventoryClient.isInStock(inStockRequest);
+        String orderNumber = UUID.randomUUID().toString();
+        ReserveProductsRequest reserveProductsRequest = new ReserveProductsRequest(orderRequest.products(), orderNumber);
 
-        if (!inStock) {
-            throw new NotInStockException("Products are not in stock, please contact us");
+        ResponseEntity<Boolean> responseEntity = inventoryClient.reserveProducts(reserveProductsRequest);
+
+        if (responseEntity.getBody() != null && !responseEntity.getBody()) {
+            throw new RuntimeException("Products are out of stock");
         }
 
-        String orderNumber = UUID.randomUUID().toString();
+
         Double totalAmount = orderRequest.products().stream().mapToDouble(dto -> dto.price()).sum() * orderRequest.quantity();
 
         Order order = orderMapper.map(orderRequest);
@@ -149,6 +159,78 @@ public class OrderServiceImpl implements OrderService  {
 
             order.getOrderProducts().add(orderProduct);
             productFromDb.getOrderProducts().add(orderProduct);
+        }
+    }
+
+    @KafkaListener(topics = {"product-events", "order-cancel-events"}, groupId = "order-service-group")
+    public void listen(ConsumerRecord<String, String> record) {
+        String topic = record.topic();
+        String message = record.value();
+
+        switch (topic) {
+            case "product-events":
+                ProductEvent productEvent = deserialize(message, ProductEvent.class);
+                handleProductEvent(productEvent);
+                break;
+            case "order-cancel-events":
+                OrderCancelEvent orderCancelEvent = deserialize(message, OrderCancelEvent.class);
+                handleOrderCancelEvent(orderCancelEvent);
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown topic: " + topic);
+        }
+    }
+
+    private <T> T deserialize(String json, Class<T> targetType) {
+        ObjectMapper objectMapper = new ObjectMapper();
+        try {
+            return objectMapper.readValue(json, targetType);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to deserialize JSON message", e);
+        }
+    }
+
+    private void handleProductEvent(ProductEvent productEvent) {
+        log.info("Got Message from product-events topic {}", productEvent);
+
+        String action = productEvent.action();
+
+        switch (action) {
+            case "CREATE": saveProduct(productEvent);
+                break;
+            case "DELETE": deleteProduct(productEvent);
+                break;
+        }
+    }
+
+    private void saveProduct(ProductEvent productEvent) {
+        Product product = new Product();
+        product.setName(productEvent.name());
+        product.setDescription(productEvent.description());
+        product.setPrice(productEvent.price());
+        product.setSkuCode(productEvent.skuCode());
+
+        productRepository.save(product);
+    }
+
+    private void deleteProduct(ProductEvent productEvent) {
+        Product product = productRepository.findBySkuCode(productEvent.skuCode())
+                .orElseThrow(() -> new RuntimeException("Product not found"));
+
+
+        productRepository.delete(product);
+    }
+
+    private void handleOrderCancelEvent(OrderCancelEvent orderCancelEvent) {
+        log.info("Got Message from order-cancel-events topic {}", orderCancelEvent);
+
+        Order order = orderRepository.findOrderByOrderNumber(orderCancelEvent.orderNumber())
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        if (!order.getStatus().equals(Status.CANCELLED)) {
+            order.setStatus(Status.CANCELLED);
+
+            orderRepository.save(order);
         }
     }
 }
