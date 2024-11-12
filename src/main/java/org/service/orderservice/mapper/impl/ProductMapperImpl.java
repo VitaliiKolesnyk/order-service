@@ -29,7 +29,7 @@ public class ProductMapperImpl implements ProductMapper {
         double totalAmount = quantity * product.getPrice();
 
         ProductDto productDto = new ProductDto(
-                product.getName(), product.getDescription(), product.getPrice(), quantity, totalAmount);
+                product.getName(), product.getDescription(), product.getPrice(), quantity, totalAmount, product.getThumbnailUrl());
 
         return productDto;
     }

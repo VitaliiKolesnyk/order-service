@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import org.service.orderservice.dto.Status;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -34,6 +35,12 @@ public class Order {
 
     @Column(name = "total_amount")
     private Double totalAmount;
+
+    @Column(name = "ordered_at")
+    private LocalDateTime orderedAt;
+
+    @Column(name = "delivered_at")
+    private LocalDateTime deliveredAt;
 
     @Enumerated(EnumType.STRING)
     private Status status;

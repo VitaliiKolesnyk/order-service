@@ -16,7 +16,7 @@ public interface OrderService {
 
     void deleteOrder(Long id);
 
-    void sendEventToKafka(String orderNumber, OrderRequest orderRequest);
+    void sendEventToKafka(String status, String orderNumber, String name, String email);
 
     OrderResponse getOrder(Long id);
 

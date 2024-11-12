@@ -15,4 +15,11 @@ public class OrderControllerAdvice {
 
         return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
     }
+
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<Error> catchRuntimeException(RuntimeException e) {
+        Error error = new Error("Unexpected error occurred, please try again or contacts us");
+
+        return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
 }

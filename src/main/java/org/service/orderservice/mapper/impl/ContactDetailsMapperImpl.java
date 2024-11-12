@@ -13,6 +13,8 @@ public class ContactDetailsMapperImpl implements ContactDetailsMapper {
         ContactDetails contactDetails = new ContactDetails();
         contactDetails.setName(contactDetailsRequest.name());
         contactDetails.setSurname(contactDetailsRequest.surname());
+        contactDetails.setEmail(contactDetailsRequest.email());
+        contactDetails.setPhone(contactDetailsRequest.phone());
         contactDetails.setCountry(contactDetailsRequest.country());
         contactDetails.setCity(contactDetailsRequest.city());
         contactDetails.setStreet(contactDetailsRequest.street());

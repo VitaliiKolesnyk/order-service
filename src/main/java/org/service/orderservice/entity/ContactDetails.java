@@ -22,6 +22,10 @@ public class ContactDetails {
 
     private String surname;
 
+    private String email;
+
+    private String phone;
+
     private String country;
 
     private String city;

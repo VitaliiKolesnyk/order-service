@@ -1,8 +1,8 @@
 package org.service.orderservice.service.impl;
 
-import brave.Response;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.service.orderservice.client.InventoryClient;
 import org.service.orderservice.dto.*;
@@ -10,9 +10,10 @@ import org.service.orderservice.entity.ContactDetails;
 import org.service.orderservice.entity.Order;
 import org.service.orderservice.entity.OrderProduct;
 import org.service.orderservice.entity.Product;
-import org.service.orderservice.event.NotificationEvent;
 import org.service.orderservice.event.OrderCancelEvent;
+import org.service.orderservice.event.OrderEvent;
 import org.service.orderservice.event.ProductEvent;
+import org.service.orderservice.exception.NotInStockException;
 import org.service.orderservice.mapper.OrderMapper;
 import org.service.orderservice.mapper.ProductMapper;
 import org.service.orderservice.repository.OrderRepository;
@@ -20,12 +21,12 @@ import org.service.orderservice.repository.ProductRepository;
 import org.service.orderservice.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -44,7 +45,7 @@ public class OrderServiceImpl implements OrderService  {
 
     private final InventoryClient inventoryClient;
 
-    private final KafkaTemplate<String, NotificationEvent> kafkaTemplate;
+    private final KafkaTemplate<String, OrderEvent> kafkaTemplate;
     private final ProductRepository productRepository;
 
     @Override
@@ -52,12 +53,12 @@ public class OrderServiceImpl implements OrderService  {
         String orderNumber = UUID.randomUUID().toString();
         ReserveProductsRequest reserveProductsRequest = new ReserveProductsRequest(orderRequest.products(), orderNumber);
 
-        ResponseEntity<Boolean> responseEntity = inventoryClient.reserveProducts(reserveProductsRequest);
-
-        if (responseEntity.getBody() != null && !responseEntity.getBody()) {
-            throw new RuntimeException("Products are out of stock");
+        try {
+            reserveProducts(reserveProductsRequest);
+        } catch (RuntimeException e) {
+            log.error("Failed to reserve products: {}", e.getMessage());
+            throw e;
         }
-
 
         Double totalAmount = orderRequest.products().stream().mapToDouble(dto -> dto.price()).sum() * orderRequest.quantity();
 
@@ -67,14 +68,27 @@ public class OrderServiceImpl implements OrderService  {
         order.setQuantity(orderRequest.quantity());
         order.setStatus(Status.NEW);
         order.setProducts(getProducts(orderRequest.products(), order));
+        order.setOrderedAt(LocalDateTime.now());
         setOrderProduct(order, orderRequest.products());
         ContactDetails contactDetails = order.getContactDetails();
         contactDetails.setOrder(order);
 
         Order savedOrder = orderRepository.save(order);
-        sendEventToKafka(orderNumber, orderRequest);
+        sendEventToKafka("Placed", orderNumber, contactDetails.getName(), contactDetails.getEmail());
 
         return orderMapper.map(savedOrder);
+    }
+
+    public void reserveProducts(ReserveProductsRequest reserveProductsRequest) {
+        ResponseEntity<Boolean> responseEntity = inventoryClient.reserveProducts(reserveProductsRequest);
+
+        if (responseEntity.getStatusCode().is5xxServerError() && responseEntity.getBody() != null && !responseEntity.getBody()) {
+            throw new RuntimeException("Circuit breaker enabled");
+        }
+
+        if (responseEntity.getBody() != null && !responseEntity.getBody()) {
+            throw new NotInStockException("Products are out of stock");
+        }
     }
 
     @Override
@@ -91,6 +105,16 @@ public class OrderServiceImpl implements OrderService  {
 
         order.setStatus(orderRequest.status());
 
+        if (orderRequest.status().equals(Status.DELIVERED)) {
+            order.setDeliveredAt(LocalDateTime.now());
+        }
+
+        if (orderRequest.status().equals(Status.CANCELLED)) {
+            String orderNumber = orderRequest.orderNumber();
+            ContactDetails contactDetails = getContactDetailsByOrderNumber(orderNumber);
+            sendEventToKafka("Canceled", orderNumber, contactDetails.getName(), contactDetails.getEmail());
+        }
+
        return orderMapper.map(orderRepository.save(order));
     }
 
@@ -100,19 +124,12 @@ public class OrderServiceImpl implements OrderService  {
     }
 
     @Override
-    public void sendEventToKafka(String orderNumber, OrderRequest orderRequest) {
-        NotificationEvent event = new NotificationEvent();
-        event.setEmail(orderRequest.userDetails().email());
-        event.setSubject(String.format("Order %s was received", orderNumber));
-        event.setMessage(String.format("""
-                Dear %s,
-                
-                Your order was received and currently is being processed;
-                """, orderRequest.contactDetails().name()));
+    public void sendEventToKafka(String status, String orderNumber, String name, String email) {
+        OrderEvent event = new OrderEvent(status, orderNumber, name, email);
 
-        log.info("Start - Sending orderPlacedEvent {} to Kafka topic order-placed", event);
+        log.info("Start - Sending orderPlacedEvent {} to Kafka topic order-topic", event);
 
-        kafkaTemplate.send("order-placed-topic", event);
+        kafkaTemplate.send("order-topic", event);
 
         log.info("End - Sending orderPlacedEvent to Kafka topic order-placed");
     }
@@ -200,6 +217,8 @@ public class OrderServiceImpl implements OrderService  {
                 break;
             case "DELETE": deleteProduct(productEvent);
                 break;
+            case "UPDATE": updateProduct(productEvent);
+                break;
         }
     }
 
@@ -209,6 +228,7 @@ public class OrderServiceImpl implements OrderService  {
         product.setDescription(productEvent.description());
         product.setPrice(productEvent.price());
         product.setSkuCode(productEvent.skuCode());
+        product.setThumbnailUrl(productEvent.thumbnailUrl());
 
         productRepository.save(product);
     }
@@ -221,6 +241,18 @@ public class OrderServiceImpl implements OrderService  {
         productRepository.delete(product);
     }
 
+    private void updateProduct(ProductEvent productEvent) {
+        Product product = productRepository.findBySkuCode(productEvent.skuCode())
+                .orElseThrow(() -> new RuntimeException("Product not found"));
+
+        product.setName(productEvent.name());
+        product.setDescription(productEvent.description());
+        product.setPrice(productEvent.price());
+        product.setThumbnailUrl(productEvent.thumbnailUrl());
+
+        productRepository.save(product);
+    }
+
     private void handleOrderCancelEvent(OrderCancelEvent orderCancelEvent) {
         log.info("Got Message from order-cancel-events topic {}", orderCancelEvent);
 
@@ -231,6 +263,17 @@ public class OrderServiceImpl implements OrderService  {
             order.setStatus(Status.CANCELLED);
 
             orderRepository.save(order);
+
+            String orderNumber = orderCancelEvent.orderNumber();
+            ContactDetails contactDetails = getContactDetailsByOrderNumber(orderNumber);
+            sendEventToKafka("Canceled", orderNumber, contactDetails.getName(), contactDetails.getEmail());
         }
+    }
+
+    private ContactDetails getContactDetailsByOrderNumber(String orderNumber) {
+        Order order = orderRepository.findOrderByOrderNumber(orderNumber)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        return order.getContactDetails();
     }
 }

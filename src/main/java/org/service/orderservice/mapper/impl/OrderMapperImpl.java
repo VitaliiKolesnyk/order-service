@@ -24,7 +24,7 @@ public class OrderMapperImpl implements OrderMapper {
     public OrderResponse map(Order order) {
         return new OrderResponse(order.getId(), order.getOrderNumber(), order.getQuantity(),
                 productMapper.mapToDtoList(order.getProducts(), order.getOrderProducts()), contactDetailsMapper.map(order.getContactDetails()),
-                order.getTotalAmount(), order.getStatus());
+                order.getTotalAmount(), order.getStatus(), order.getOrderedAt(), order.getDeliveredAt());
     }
 
     public Order map(OrderRequest orderRequest) {
